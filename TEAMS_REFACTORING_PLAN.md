@@ -9,13 +9,60 @@ However, this requires significant architectural changes due to fundamental diff
 ### Key Findings
 
 - **Core Architecture is Reusable**: The PostgreSQL-backed event queue, worker pool system, and AI agent logic (Pydantic-AI + MCP) can be preserved
-- **Major Refactoring Required**: Complete replacement of Slack SDK integration with Bot Framework SDK (~40-50% of codebase)
-- **SDK Ecosystem**: Bot Framework is being deprecated (Dec 2025), requiring evaluation of Teams AI v2 or M365 Agents SDK
-- **Connection Model**: Shift from Slack Socket Mode to Azure Bot Service webhook endpoints or alternative connection methods
+- **Major Refactoring Required**: Complete replacement of Slack SDK integration with Microsoft 365 Agents SDK (~40-50% of codebase)
+- **SDK Choice**: **M365 Agents SDK** is the recommended path (Bot Framework's official successor, supports multi-channel deployment)
+- **Connection Model**: Shift from Slack Socket Mode to webhook endpoints with JWT authentication
+- **Perfect AI Fit**: M365 Agents SDK is "unopinionated about AI" - works seamlessly with Tiger Agent's existing Pydantic-AI + MCP architecture
 
 ### Recommendation
 
-**Dual-Platform Support**: Refactor into a platform-agnostic core with pluggable platform adapters (Slack and Teams), rather than replacing Slack entirely.
+**Dual-Platform Support with M365 Agents SDK**: Refactor into a platform-agnostic core with pluggable platform adapters (Slack and Teams), using M365 Agents SDK for Teams integration. This provides the best long-term foundation and multi-channel capabilities.
+
+---
+
+## Why M365 Agents SDK?
+
+**UPDATED RECOMMENDATION** (based on latest SDK research):
+
+After evaluating the SDK landscape, **Microsoft 365 Agents SDK is the clear choice** for Teams integration:
+
+### Decision Matrix: Teams AI vs M365 Agents SDK
+
+| Factor | Teams AI Library | M365 Agents SDK | Winner |
+|--------|------------------|-----------------|---------|
+| **Python Status** | Developer preview | ✅ Fully available | M365 SDK |
+| **AI Integration** | Opinionated (built-in) | ✅ Unopinionated (BYO AI) | M365 SDK |
+| **Tiger Agent Fit** | ❌ Conflicts with Pydantic-AI | ✅ Perfect fit | M365 SDK |
+| **Channels Supported** | Teams only | ✅ 15+ channels | M365 SDK |
+| **Long-term Support** | Unclear relationship to M365 SDK | ✅ Bot Framework successor | M365 SDK |
+| **Bot Framework Migration** | N/A | ✅ Official migration path | M365 SDK |
+
+### Why M365 Agents SDK is Perfect for Tiger Agent
+
+1. **Unopinionated About AI** 🎯
+   - Tiger Agent already has Pydantic-AI + MCP for orchestration
+   - M365 SDK doesn't force its own AI framework
+   - Teams AI Library would conflict with existing architecture
+
+2. **Bot Framework Successor** 🏆
+   - Official evolution/replacement for Bot Framework (deprecated Dec 2025)
+   - Maintains compatibility during transition
+   - Microsoft's long-term supported path
+
+3. **Multi-Channel Ready** 🌐
+   - Supports Teams, Slack, web chat, and 15+ other channels
+   - Future-proof for additional platform support
+   - Single SDK for all channels (if desired)
+
+4. **Production Ready** ✅
+   - Python SDK is fully available (not preview)
+   - Active development and Microsoft support
+   - Official documentation and samples available
+
+5. **Modern Architecture** 🚀
+   - Built on async/await patterns
+   - aiohttp integration for webhook handling
+   - Clean separation of concerns
 
 ---
 
@@ -25,18 +72,19 @@ However, this requires significant architectural changes due to fundamental diff
 
 | Aspect | Slack | Microsoft Teams |
 |--------|-------|-----------------|
-| **SDK** | Slack Bolt SDK (Python) | Bot Framework SDK (Python) - DEPRECATED Dec 2025 |
-| **Connection Method** | Socket Mode (WebSocket) | Webhook endpoint (HTTPS) |
-| **Public Endpoint** | Not required (Socket Mode) | Required (unless using alternative hosting) |
-| **Behind Firewall** | Works natively | Requires Azure Bot Service or workarounds |
-| **Multi-Channel** | Slack-only | Bot Framework supports 15+ channels (Teams, Slack, Facebook, etc.) |
+| **SDK** | Slack Bolt SDK (Python) | M365 Agents SDK (Python) - Bot Framework successor |
+| **Connection Method** | Socket Mode (WebSocket) | Webhook endpoint (HTTPS) with JWT auth |
+| **Public Endpoint** | Not required (Socket Mode) | Required for webhook |
+| **Behind Firewall** | Works natively | Requires public endpoint or Azure hosting |
+| **Multi-Channel** | Slack-only | M365 Agents SDK supports 15+ channels (Teams, Slack, web chat, etc.) |
+| **AI Integration** | No built-in AI | Unopinionated - bring your own AI framework |
 
 ### 2. Event Model
 
 | Aspect | Slack | Microsoft Teams |
 |--------|-------|-----------------|
 | **Event Type** | `app_mention`, `message` events | `Activity` objects (message, conversationUpdate, invoke, etc.) |
-| **Event Schema** | JSON with event_ts, text, user, channel, etc. | Bot Framework Activity schema with from, conversation, text, etc. |
+| **Event Schema** | JSON with event_ts, text, user, channel, etc. | M365 Agents Activity schema with from, conversation, text, etc. |
 | **Message ID** | `ts` (timestamp string) | `id` (unique activity ID) |
 | **User ID** | Slack user ID (U1234567) | AAD object ID or channel-specific ID |
 | **Channel ID** | Slack channel ID (C1234567) | Conversation ID (channel, 1:1, group chat) |
@@ -47,19 +95,21 @@ However, this requires significant architectural changes due to fundamental diff
 
 | Aspect | Slack | Microsoft Teams |
 |--------|-------|-----------------|
-| **SDK Client** | `AsyncWebClient` | `TurnContext` + `BotAdapter` |
+| **SDK Client** | `AsyncWebClient` | `TurnContext` + `CloudAdapter` |
 | **Send Message** | `chat_postMessage` | `TurnContext.send_activity` |
-| **Reactions** | `reactions_add/remove` | Not directly supported (use messages or adaptive cards) |
-| **User Info** | `users_info` API | Microsoft Graph API |
+| **Reactions** | `reactions_add/remove` | Not directly supported (use typing indicators or messages) |
+| **User Info** | `users_info` API | Microsoft Graph API (optional) |
 | **Bot Info** | `auth_test` + `bots_info` | Provided in `Activity.recipient` |
+| **Handler Pattern** | Event listeners | `TeamsActivityHandler` subclass |
 
 ### 4. Authentication
 
 | Aspect | Slack | Microsoft Teams |
 |--------|-------|-----------------|
 | **Bot Token** | `xoxb-...` (Bearer token) | Azure AD app credentials (App ID + Password/Certificate) |
-| **App Token** | `xapp-...` (for Socket Mode) | Not applicable |
-| **Scopes** | OAuth scopes (users:read, chat:write, etc.) | Bot Framework authentication + Graph API permissions |
+| **App Token** | `xapp-...` (for Socket Mode) | Not applicable (JWT validation on webhook) |
+| **Scopes** | OAuth scopes (users:read, chat:write, etc.) | M365 Agents authentication + Graph API permissions (optional) |
+| **Validation** | Token-based authentication | JWT signature verification via CloudAdapter |
 
 ---
 
@@ -97,8 +147,8 @@ However, this requires significant architectural changes due to fundamental diff
    - Reaction management
 
 2. **Event Handling** (`tiger_agent/harness.py`) - **Partial refactoring**
-   - `_on_event` callback registration (Slack Bolt → Bot Framework handler)
-   - Socket Mode handler → Webhook endpoint/adapter
+   - `_on_event` callback registration (Slack Bolt → M365 Agents handler)
+   - Socket Mode handler → Webhook endpoint with aiohttp server
    - Slack-specific event filters
 
 3. **Data Models** (`tiger_agent/types.py`) - **Extension needed**
@@ -286,130 +336,189 @@ tiger_agent/platforms/teams/
 └── auth.py             # Azure AD authentication helpers
 ```
 
-#### 2.2 Implement TeamsAdapter
+#### 2.2 Implement TeamsAdapter with M365 Agents SDK
+
+Create `tiger_agent/platforms/teams/bot.py`:
+
+```python
+from microsoft_agents.hosting.core import TurnContext
+from microsoft_agents.hosting.teams import TeamsActivityHandler
+from microsoft_agents.activity import Activity, ActivityTypes
+from typing import Callable
+
+class TeamsBot(TeamsActivityHandler):
+    """Teams bot using M365 Agents SDK"""
+
+    def __init__(self, event_callback: Callable):
+        super().__init__()
+        self.event_callback = event_callback
+        self.conversation_refs = {}  # Store for sending proactive messages
+
+    async def on_message_activity(self, turn_context: TurnContext):
+        """Handle incoming message activities"""
+        activity = turn_context.activity
+
+        # Store conversation reference for later use
+        self._store_conversation_ref(turn_context)
+
+        # Check if bot was mentioned (for channel messages)
+        if activity.conversation.conversation_type == "channel":
+            if not self._is_bot_mentioned(activity):
+                return
+
+        # Convert to platform-agnostic message
+        message = self._parse_activity(activity)
+
+        # Trigger event processing
+        if self.event_callback:
+            await self.event_callback(message)
+
+    def _is_bot_mentioned(self, activity: Activity) -> bool:
+        """Check if bot was @mentioned"""
+        if not activity.entities:
+            return False
+
+        return any(
+            e.type == "mention" and
+            e.mentioned.id == activity.recipient.id
+            for e in activity.entities
+        )
+
+    def _store_conversation_ref(self, turn_context: TurnContext):
+        """Store conversation reference for proactive messaging"""
+        from microsoft_agents.activity import TurnContextExtensions
+        ref = TurnContextExtensions.get_conversation_reference(turn_context.activity)
+        self.conversation_refs[turn_context.activity.conversation.id] = ref
+
+    def _parse_activity(self, activity: Activity) -> dict:
+        """Convert Activity to platform-agnostic dict"""
+        return {
+            "id": activity.id,
+            "timestamp": activity.timestamp,
+            "text": activity.text or "",
+            "user_id": activity.from_property.id,
+            "user_name": activity.from_property.name,
+            "channel_id": activity.conversation.id,
+            "channel_name": getattr(activity.conversation, "name", None),
+            "thread_id": activity.reply_to_id,
+            "raw_event": activity
+        }
+```
 
 Create `tiger_agent/platforms/teams/adapter.py`:
 
 ```python
-from botbuilder.core import BotFrameworkAdapter, TurnContext
-from botbuilder.schema import Activity, ActivityTypes
-from aiohttp import web
+from microsoft_agents.hosting.core import CloudAdapter
+from microsoft_agents.hosting.aiohttp import start_agent_process
+from microsoft_agents.activity import Activity, ActivityTypes
+from tiger_agent.platforms.base import PlatformAdapter, PlatformMessage, PlatformUser, PlatformBot
+from tiger_agent.platforms.teams.bot import TeamsBot
+from datetime import datetime
+from typing import Callable
 
 class TeamsAdapter(PlatformAdapter):
-    """Microsoft Teams platform adapter using Bot Framework SDK"""
+    """Microsoft Teams platform adapter using M365 Agents SDK"""
 
     def __init__(self, app_id: str, app_password: str, port: int = 3978):
         self.app_id = app_id
         self.app_password = app_password
         self.port = port
-
-        # Create Bot Framework adapter
-        from botbuilder.core.bot_framework_adapter_settings import BotFrameworkAdapterSettings
-        settings = BotFrameworkAdapterSettings(app_id, app_password)
-        self.adapter = BotFrameworkAdapter(settings)
-
-        self.event_callback = None
-        self.bot_info = None
+        self.bot = None
+        self.adapter = None
 
     async def start(self, event_callback: Callable) -> None:
-        """Start webhook server for Bot Framework"""
-        self.event_callback = event_callback
+        """Start M365 Agents SDK webhook server"""
+        # Create bot with event callback
+        self.bot = TeamsBot(event_callback)
 
-        app = web.Application()
-        app.router.add_post("/api/messages", self._handle_webhook)
+        # Create CloudAdapter with Azure AD authentication
+        self.adapter = CloudAdapter(
+            app_id=self.app_id,
+            app_password=self.app_password
+        )
 
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', self.port)
-        await site.start()
+        # Start aiohttp server on /api/messages endpoint
+        # This is provided by M365 Agents SDK
+        await start_agent_process(
+            bot=self.bot,
+            adapter=self.adapter,
+            port=self.port
+        )
 
         print(f"Teams bot listening on http://0.0.0.0:{self.port}/api/messages")
-        # Keep running (this would integrate with TaskGroup)
 
-    async def _handle_webhook(self, request: web.Request) -> web.Response:
-        """Handle incoming webhook from Bot Service"""
-        body = await request.json()
-        activity = Activity().deserialize(body)
-
-        auth_header = request.headers.get("Authorization", "")
-
-        async def turn_callback(turn_context: TurnContext):
-            await self._process_activity(turn_context)
-
-        await self.adapter.process_activity(activity, auth_header, turn_callback)
-        return web.Response(status=200)
-
-    async def _process_activity(self, turn_context: TurnContext):
-        """Process Bot Framework activity"""
-        activity = turn_context.activity
-
-        # Only process message activities with mentions
-        if activity.type != ActivityTypes.message:
-            return
-
-        # Check if bot was mentioned
-        if not self._is_bot_mentioned(activity):
-            return
-
-        # Convert to PlatformMessage
-        message = self.parse_event(activity.as_dict())
-
-        # Call event callback
-        if self.event_callback:
-            await self.event_callback(message)
-
-    def _is_bot_mentioned(self, activity: Activity) -> bool:
-        """Check if bot was @mentioned in the activity"""
-        if not activity.entities:
-            return False
-
-        for entity in activity.entities:
-            if entity.type == "mention" and entity.mentioned.id == activity.recipient.id:
-                return True
-        return False
-
-    def parse_event(self, event: dict) -> PlatformMessage:
+    def parse_event(self, event: dict | Activity) -> PlatformMessage:
         """Convert Teams Activity to PlatformMessage"""
-        activity = Activity().deserialize(event)
+        if isinstance(event, dict):
+            activity = event.get("raw_event", event)
+        else:
+            activity = event
 
         return PlatformMessage(
-            id=activity.id,
-            timestamp=activity.timestamp or datetime.now(),
-            text=activity.text or "",
-            user_id=activity.from_property.id,
-            user_name=activity.from_property.name,
-            channel_id=activity.conversation.id,
-            channel_name=activity.conversation.name,
-            thread_id=activity.reply_to_id,
+            id=activity.id if hasattr(activity, "id") else event.get("id"),
+            timestamp=activity.timestamp if hasattr(activity, "timestamp") else datetime.now(),
+            text=event.get("text", ""),
+            user_id=event.get("user_id", ""),
+            user_name=event.get("user_name"),
+            channel_id=event.get("channel_id", ""),
+            channel_name=event.get("channel_name"),
+            thread_id=event.get("thread_id"),
             raw_event=event
         )
 
     async def send_message(self, channel_id: str, text: str, thread_id: str | None = None) -> None:
-        """Send Teams message"""
-        # Create activity
-        activity = Activity(
-            type=ActivityTypes.message,
-            text=text,
-            conversation={"id": channel_id}
+        """Send Teams message using stored conversation reference"""
+        # Get stored conversation reference
+        conv_ref = self.bot.conversation_refs.get(channel_id)
+
+        if not conv_ref:
+            raise ValueError(f"No conversation reference found for channel {channel_id}")
+
+        # Create activity callback
+        async def send_callback(turn_context: TurnContext):
+            reply = Activity(
+                type=ActivityTypes.message,
+                text=text
+            )
+
+            if thread_id:
+                reply.reply_to_id = thread_id
+
+            await turn_context.send_activity(reply)
+
+        # Send using adapter's continue_conversation
+        await self.adapter.continue_conversation(
+            conv_ref,
+            send_callback,
+            audience=self.app_id
         )
 
-        if thread_id:
-            activity.reply_to_id = thread_id
-
-        # Send via connector client
-        # Note: This requires storing the service_url from incoming activity
-        from botbuilder.schema import ConversationReference
-        # Implementation would use stored conversation reference
-        raise NotImplementedError("Requires conversation reference management")
-
     async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
-        """Teams doesn't support reactions like Slack - this is a no-op"""
-        pass  # Teams doesn't have direct reaction API
+        """Teams doesn't support reactions like Slack - use typing indicator instead"""
+        # Teams doesn't have direct reaction API
+        # Instead, we send a typing indicator
+        await self.send_typing_indicator(channel_id)
+
+    async def send_typing_indicator(self, channel_id: str) -> None:
+        """Send typing indicator to show bot is processing"""
+        conv_ref = self.bot.conversation_refs.get(channel_id)
+
+        if conv_ref:
+            async def typing_callback(turn_context: TurnContext):
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.typing)
+                )
+
+            await self.adapter.continue_conversation(
+                conv_ref,
+                typing_callback,
+                audience=self.app_id
+            )
 
     async def get_user_info(self, user_id: str) -> PlatformUser | None:
-        """Fetch Teams user info via Microsoft Graph"""
-        # Would require Graph API integration
-        # For now, return minimal info
+        """Fetch Teams user info (basic from activity, optionally enhance with Graph API)"""
+        # Basic implementation returns minimal info
+        # Can be enhanced with Microsoft Graph API integration
         return PlatformUser(
             id=user_id,
             name="Unknown",
@@ -590,18 +699,21 @@ Slack uses timestamp-based IDs (`ts`), Teams uses GUIDs. This is already handled
 
 ## Challenges and Risks
 
-### 1. SDK Deprecation (CRITICAL)
+### 1. ~~SDK Deprecation~~ ✅ RESOLVED
 
-**Challenge**: Bot Framework SDK support ends December 31, 2025
+**Previous Challenge**: Bot Framework SDK support ends December 31, 2025
 
-**Impact**: High - current Teams implementation path is deprecated
+**Resolution**: **Using M365 Agents SDK** - the official successor to Bot Framework, fully supported and future-proof.
 
-**Mitigation Options**:
-- **Option A**: Use Bot Framework SDK short-term, plan migration to Teams AI v2 in 2026
-- **Option B**: Implement directly with Teams AI v2 (Python in developer preview)
-- **Option C**: Use M365 Agents SDK for multi-channel support
+**Benefits of M365 Agents SDK**:
+- ✅ Long-term Microsoft support (Bot Framework successor)
+- ✅ Unopinionated AI integration (perfect for Pydantic-AI + MCP)
+- ✅ Multi-channel support (Teams, Slack, web chat, and 15+ others)
+- ✅ Python SDK fully available (not preview)
+- ✅ Built on modern async patterns
+- ✅ Official migration path from Bot Framework
 
-**Recommendation**: Start with Bot Framework SDK (stable, well-documented) but plan Q1 2026 migration to Teams AI v2 once Python SDK reaches GA.
+**Status**: **Low Risk** - M365 Agents SDK is the recommended, supported path forward.
 
 ### 2. Webhook Endpoint Requirement
 
@@ -661,11 +773,12 @@ Slack uses timestamp-based IDs (`ts`), Teams uses GUIDs. This is already handled
 - [ ] Verify Slack functionality unchanged
 
 ### Milestone 2: Teams Adapter Implementation (3-4 weeks)
-- [ ] Set up Bot Framework SDK dependencies
-- [ ] Implement `TeamsAdapter` with webhook server
+- [ ] Set up M365 Agents SDK dependencies
+- [ ] Implement `TeamsBot` with `TeamsActivityHandler`
+- [ ] Implement `TeamsAdapter` with CloudAdapter and aiohttp
 - [ ] Implement activity parsing and message sending
+- [ ] Add conversation reference management for proactive messaging
 - [ ] Create Azure Bot Service setup documentation
-- [ ] Add conversation reference management
 - [ ] Implement typing indicators for "processing" state
 - [ ] Add unit tests for Teams adapter
 - [ ] Local testing with ngrok
@@ -744,16 +857,19 @@ dependencies = [
     "slack-bolt>=1.18",
     "slack-sdk>=3.0",
 
-    # Teams (new)
-    "botbuilder-core>=4.16",
-    "botbuilder-schema>=4.16",
-    "botframework-connector>=4.16",
-    "aiohttp>=3.8",
+    # Teams - M365 Agents SDK (new)
+    "microsoft-agents-hosting-core",
+    "microsoft-agents-hosting-aiohttp",
+    "microsoft-agents-hosting-extensions-teams",
+    "microsoft-agents-activity",
+    "microsoft-agents-authentication",
 
-    # Optional: Microsoft Graph
-    "msgraph-sdk>=1.0",  # For enhanced user context
+    # Optional: Microsoft Graph for enhanced user context
+    "msgraph-sdk>=1.0",
 ]
 ```
+
+**Note**: M365 Agents SDK requires Python 3.10+ (Python 3.11+ recommended for optimal performance).
 
 ---
 
@@ -776,22 +892,24 @@ dependencies = [
 
 **Verdict**: ❌ Not recommended - abstraction overhead is worth unified codebase
 
-### Option 2: Bot Framework as Universal Adapter
+### Option 2: M365 Agents SDK as Universal Adapter
 
-**Approach**: Use Bot Framework for both Slack AND Teams (Bot Framework supports Slack)
+**Approach**: Use M365 Agents SDK for both Slack AND Teams (SDK supports 15+ channels)
 
 **Pros**:
 - Single integration model
-- Bot Framework handles platform differences
-- Future multi-channel support easier
+- M365 SDK handles platform differences
+- Built-in multi-channel support (Teams, Slack, web chat, etc.)
+- Future-proof (Bot Framework successor)
+- Unopinionated about AI (works with Pydantic-AI)
 
 **Cons**:
-- Bot Framework Slack support is limited
-- Loses native Slack features (Socket Mode, etc.)
-- SDK is deprecated Dec 2025
+- M365 SDK Slack support may be limited compared to native Slack Bolt
+- Loses Slack-specific features (Socket Mode, native reactions, etc.)
 - More complex for Slack-only users
+- Additional abstraction layer
 
-**Verdict**: ❌ Not recommended - native Slack SDK is superior
+**Verdict**: ⚠️ Interesting option for future - but start with native Slack SDK for best Slack experience, use M365 SDK for Teams only
 
 ### Option 3: Multi-Platform from Day 1
 
@@ -865,21 +983,29 @@ Both instances share the same PostgreSQL event queue and can process events from
 
 **Teams**: Webhook requires:
 - HTTPS with valid TLS certificate
-- Bot Framework signature verification
+- JWT signature verification (handled by M365 Agents SDK)
 - Request validation against Azure AD
 
 **Implementation**:
 
 ```python
 class TeamsAdapter:
-    async def _handle_webhook(self, request: web.Request) -> web.Response:
-        # Validate Bot Framework signature
-        auth_header = request.headers.get("Authorization", "")
+    async def start(self, event_callback: Callable) -> None:
+        # CloudAdapter automatically handles JWT validation
+        self.adapter = CloudAdapter(
+            app_id=self.app_id,
+            app_password=self.app_password
+        )
 
-        # This validation is handled by BotFrameworkAdapter.process_activity()
-        # which verifies JWT token from Azure Bot Service
-        await self.adapter.process_activity(activity, auth_header, turn_callback)
+        # start_agent_process handles webhook setup with built-in security
+        await start_agent_process(
+            bot=self.bot,
+            adapter=self.adapter,  # JWT validation happens here
+            port=self.port
+        )
 ```
+
+**Note**: M365 Agents SDK's `CloudAdapter` automatically validates JWT tokens from Azure Bot Service, ensuring only authenticated requests are processed.
 
 ### 2. Credential Management
 
@@ -966,17 +1092,19 @@ Before starting implementation, clarify:
 ### Recommended Path Forward
 
 1. **Phase 1 (Weeks 1-3)**: Implement platform abstraction layer
-2. **Phase 2 (Weeks 4-7)**: Build Teams adapter with Bot Framework SDK
+2. **Phase 2 (Weeks 4-7)**: Build Teams adapter with **M365 Agents SDK**
 3. **Phase 3 (Weeks 8-10)**: Handle platform-specific features
 4. **Phase 4 (Weeks 11-12)**: Testing and documentation
 
 ### Key Success Factors
 
+- ✅ Use M365 Agents SDK (Bot Framework's official successor)
 - ✅ Use adapter pattern for clean platform separation
 - ✅ Maintain backwards compatibility for Slack users
 - ✅ Document setup clearly for both platforms
-- ⚠️ Plan for Bot Framework → Teams AI v2 migration in 2026
+- ✅ Leverage M365 SDK's unopinionated AI approach for Pydantic-AI integration
 - ✅ Keep event queue and worker system platform-agnostic
+- ✅ Future-proof with multi-channel support built-in
 
 ### Next Steps
 
@@ -990,25 +1118,33 @@ Before starting implementation, clarify:
 
 ## Appendix: Useful Resources
 
+### Microsoft 365 Agents SDK (Primary)
+
+- **[M365 Agents SDK Overview](https://learn.microsoft.com/en-us/microsoft-365/agents-sdk/agents-sdk-overview)** - Official SDK documentation
+- **[M365 Agents SDK Python Quickstart](https://learn.microsoft.com/en-us/microsoft-365/agents-sdk/quickstart-python)** - Getting started guide
+- **[M365 Agents SDK Python API Reference](https://learn.microsoft.com/en-us/python/api/agent-sdk-python/agents-overview)** - Complete API docs
+- **[GitHub: microsoft/Agents-for-python](https://github.com/microsoft/Agents-for-python)** - Official Python SDK repository
+- **[GitHub: microsoft/Agents](https://github.com/microsoft/Agents)** - Main repo with samples
+- **[Bot Framework to M365 SDK Migration Guide](https://learn.microsoft.com/en-us/microsoft-365/agents-sdk/bf-migration-guidance)** - Official migration docs
+
 ### Microsoft Teams Bot Development
 
 - [Teams Bot Quickstart (Python)](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/build-a-bot)
-- [Bot Framework SDK for Python](https://github.com/microsoft/botbuilder-python)
-- [Teams Activity Handler Reference](https://learn.microsoft.com/en-us/python/api/botbuilder-core/botbuilder.core.teams.teamsactivityhandler)
-- [Bot Framework Activity Schema](https://learn.microsoft.com/en-us/azure/bot-service/rest-api/bot-framework-rest-connector-activities)
+- [Teams Activity Handler Reference](https://microsoft.github.io/Agents-for-js/classes/_microsoft_agents-hosting-extensions-teams.TeamsActivityHandler.html)
+- [Create and Deploy Custom Engine Agents](https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/create-deploy-agents-sdk)
 
 ### Azure Bot Service
 
 - [Create Azure Bot Resource](https://learn.microsoft.com/en-us/azure/bot-service/bot-service-quickstart-registration)
 - [Configure Teams Channel](https://learn.microsoft.com/en-us/azure/bot-service/channel-connect-teams)
-- [Bot Authentication](https://learn.microsoft.com/en-us/azure/bot-service/bot-builder-concept-authentication-types)
 
 ### Microsoft Graph API
 
 - [Graph SDK for Python](https://github.com/microsoftgraph/msgraph-sdk-python)
 - [Get User Info](https://learn.microsoft.com/en-us/graph/api/user-get)
 
-### Comparison Resources
+### SDK Comparison & Migration
 
-- [Bot Framework vs Slack Comparison](https://stackoverflow.com/questions/44354296/botkit-slack-bot-to-microsoft-teams-bot)
+- [Teams SDK Evolution 2025](https://www.voitanos.io/blog/microsoft-teams-sdk-evolution-2025/) - Detailed SDK comparison
+- [Why M365 Agents SDK Should Be on Your Radar](https://www.koskila.net/Why-m365-agents-sdk-should-be-on-your-radar/)
 - [Microsoft Teams vs Slack](https://kinsta.com/blog/microsoft-teams-vs-slack/)
